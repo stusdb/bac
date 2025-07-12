@@ -1,72 +1,105 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams } from "next/navigation"
 import Image from "next/image"
+import { Star, PlayCircle, ChevronDown, ChevronUp, ImageIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
-import { LoadingSpinner } from "@/components/loading-spinner"
-import type { Movie } from "@/types/movie"
-import { getMovieById } from "@/lib/api"
-import { useFavorites } from "@/hooks/use-favorites"
-import { useLanguage } from "@/hooks/use-language"
-import { Play, Heart, Share2, Star, Clock, Calendar, Eye, ArrowLeft } from "lucide-react"
+import {
+  getMovieDetails,
+  getMovieCredits,
+  getMovieImages,
+  getMovieVideos,
+  getImageUrl,
+  getBackdropUrl,
+  type MovieDetails,
+  type CastMember,
+  type MovieImage,
+  type MovieVideo,
+} from "@/lib/tmdb-api"
+import LoadingSpinner from "@/components/loading-spinner"
+import EmptyState from "@/components/empty-state"
+import CastCard from "@/components/cast-card"
+import DetailCard from "@/components/detail-card"
+import CompanyCard from "@/components/company-card"
+import ImageModal from "@/components/image-modal"
+import { useToast } from "@/hooks/use-toast"
+import Plyr from "plyr-react"
+import "plyr-react/plyr.css"
 
-export default function MovieDetailsPage() {
-  const params = useParams()
-  const router = useRouter()
-  const { language } = useLanguage()
-  const { favorites, addToFavorites, removeFromFavorites } = useFavorites()
-  const [movie, setMovie] = useState<Movie | null>(null)
+// Helper to format currency
+const formatCurrency = (amount: number) => {
+  if (!amount) return "N/A"
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
+// Helper to format runtime
+const formatRuntime = (minutes: number | null) => {
+  if (!minutes) return "N/A"
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  return `${hours}h ${remainingMinutes}m`
+}
+
+export default function MovieDetailPage() {
+  const { id } = useParams()
+  const movieId = typeof id === "string" ? Number.parseInt(id) : null
+
+  const [movie, setMovie] = useState<MovieDetails | null>(null)
+  const [cast, setCast] = useState<CastMember[]>([])
+  const [images, setImages] = useState<MovieImage[]>([])
+  const [videos, setVideos] = useState<MovieVideo[]>([])
   const [loading, setLoading] = useState(true)
-
-  const movieId = params.id as string
-  const isFavorite = favorites.includes(movieId)
+  const [showFullOverview, setShowFullOverview] = useState(false)
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false)
+  const [currentImage, setCurrentImage] = useState("")
+  const { toast } = useToast()
 
   useEffect(() => {
-    const loadMovie = async () => {
+    if (!movieId) {
+      setLoading(false)
+      return
+    }
+
+    const fetchData = async () => {
+      setLoading(true)
       try {
-        const movieData = await getMovieById(movieId)
-        setMovie(movieData)
+        const [movieDetails, movieCredits, movieImages, movieVideos] = await Promise.all([
+          getMovieDetails(movieId),
+          getMovieCredits(movieId),
+          getMovieImages(movieId),
+          getMovieVideos(movieId),
+        ])
+
+        setMovie(movieDetails)
+        setCast(movieCredits?.cast || [])
+        setImages(movieImages?.backdrops || []) // Prioritize backdrops for images section
+        setVideos(movieVideos?.results || [])
       } catch (error) {
-        console.error("Error loading movie:", error)
+        toast({
+          title: "Error",
+          description: "Failed to load movie details.",
+          variant: "destructive",
+        })
       } finally {
         setLoading(false)
       }
     }
 
-    if (movieId) {
-      loadMovie()
-    }
-  }, [movieId])
+    fetchData()
+  }, [movieId, toast])
 
-  const handleFavoriteToggle = () => {
-    if (isFavorite) {
-      removeFromFavorites(movieId)
-    } else {
-      addToFavorites(movieId)
-    }
-  }
+  const trailerVideo = videos.find((video) => video.type === "Trailer" && video.site === "YouTube")
+  const youtubeId = trailerVideo?.key
 
-  const handleShare = async () => {
-    if (navigator.share && movie) {
-      try {
-        await navigator.share({
-          title: language === "ar" ? movie.title_ar : movie.title_en,
-          text: language === "ar" ? movie.description_ar : movie.description_en,
-          url: window.location.href,
-        })
-      } catch (error) {
-        console.error("Error sharing:", error)
-      }
-    }
-  }
-
-  const handlePlay = () => {
-    if (movie) {
-      router.push(`/player/${movie.id}`)
-    }
+  const handleImageClick = (imageUrl: string) => {
+    setCurrentImage(imageUrl)
+    setIsImageModalOpen(true)
   }
 
   if (loading) {
@@ -74,126 +107,188 @@ export default function MovieDetailsPage() {
   }
 
   if (!movie) {
-    return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="text-center text-white">
-          <h2 className="text-2xl font-bold mb-2">Movie Not Found</h2>
-          <p className="text-gray-400">The requested movie could not be found.</p>
-        </div>
-      </div>
-    )
+    return <EmptyState message="Movie not found." />
   }
 
-  const title = language === "ar" ? movie.title_ar : movie.title_en
-  const description = language === "ar" ? movie.description_ar : movie.description_en
+  const displayOverview = showFullOverview ? movie.overview : `${movie.overview?.substring(0, 150)}...`
+  const needsTruncation = movie.overview && movie.overview.length > 150
 
   return (
-    <div className="min-h-screen bg-gray-950">
-      {/* Header */}
-      <div className="sticky top-0 z-50 bg-gray-950/80 backdrop-blur-sm border-b border-gray-800">
-        <div className="flex items-center gap-4 p-4">
-          <Button variant="ghost" size="icon" onClick={() => router.back()} className="text-white hover:bg-gray-800">
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <h1 className="text-lg font-semibold text-white truncate">{title}</h1>
+    <div className="min-h-screen bg-background-dark text-text-white pb-16 md:pb-0">
+      <div className="relative w-full h-[300px] md:h-[400px] overflow-hidden">
+        <Image
+          src={getBackdropUrl(movie.backdrop_path || movie.poster_path, "w1280")}
+          alt={movie.title}
+          fill
+          className="object-cover"
+          priority
+          onError={(e) => {
+            e.currentTarget.src = "/placeholder.svg?height=400&width=1280"
+            e.currentTarget.srcset = ""
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-background-dark to-transparent" />
+        <div className="absolute bottom-0 left-0 right-0 p-4">
+          <h1 className="text-3xl md:text-4xl font-bold text-text-white drop-shadow-lg">{movie.title}</h1>
+          {movie.tagline && <p className="text-lg text-gray-300 italic mt-1">{movie.tagline}</p>}
+          <div className="flex items-center gap-2 mt-2">
+            <Star className="h-5 w-5 fill-accent-gold text-accent-gold" />
+            <span className="text-xl font-semibold">
+              {movie.vote_average ? (Math.round(movie.vote_average * 10) / 10).toFixed(1) : "N/A"}
+            </span>
+            <span className="text-gray-400 text-sm">({movie.vote_count} votes)</span>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {movie.genres.map((genre) => (
+              <span key={genre.id} className="bg-primary-red text-white text-xs px-2 py-1 rounded-full">
+                {genre.name}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Movie Poster & Info */}
-      <div className="relative">
-        <div className="aspect-video relative overflow-hidden">
-          <Image src={movie.poster_url || "/placeholder.svg"} alt={title} fill className="object-cover" priority />
-          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/50 to-transparent" />
-
-          {/* Play Button Overlay */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Button
-              onClick={handlePlay}
-              size="lg"
-              className="bg-blue-600 hover:bg-blue-700 text-white rounded-full w-16 h-16 p-0"
-            >
-              <Play className="h-8 w-8 ml-1" fill="currentColor" />
+      <div className="container mx-auto px-4 py-6">
+        {/* Watch Trailer / Add to List */}
+        <div className="flex gap-4 mb-6">
+          {youtubeId && (
+            <Button className="flex-1 bg-primary-red text-white hover:bg-primary-red/90">
+              <PlayCircle className="h-5 w-5 mr-2" />
+              Watch Trailer
             </Button>
-          </div>
+          )}
+          <Button
+            variant="outline"
+            className="flex-1 border-primary-red text-primary-red hover:bg-primary-red/10 bg-transparent"
+          >
+            Add to List
+          </Button>
         </div>
 
-        {/* Movie Info */}
-        <div className="px-4 py-6">
-          <div className="flex items-start justify-between mb-4">
-            <div className="flex-1">
-              <h1 className="text-2xl font-bold text-white mb-2">{title}</h1>
-              <div className="flex items-center gap-4 text-sm text-gray-400 mb-4">
-                <div className="flex items-center gap-1">
-                  <Calendar className="h-4 w-4" />
-                  <span>{movie.year}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Clock className="h-4 w-4" />
-                  <span>{movie.duration || "120"} min</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Eye className="h-4 w-4" />
-                  <span>{movie.views.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-2">
+        {/* Overview */}
+        <section className="mb-6">
+          <h2 className="text-2xl font-bold mb-3">Overview</h2>
+          <p className="text-gray-300 text-base leading-relaxed">
+            {displayOverview}
+            {needsTruncation && (
               <Button
-                variant="outline"
-                size="icon"
-                onClick={handleFavoriteToggle}
-                className={`border-gray-600 ${
-                  isFavorite
-                    ? "bg-red-600 text-white border-red-600"
-                    : "text-gray-400 hover:text-white hover:bg-gray-800"
-                }`}
+                variant="link"
+                className="p-0 h-auto text-primary-red ml-1"
+                onClick={() => setShowFullOverview(!showFullOverview)}
               >
-                <Heart className={`h-5 w-5 ${isFavorite ? "fill-current" : ""}`} />
+                {showFullOverview ? "Show Less" : "Read More"}
+                {showFullOverview ? <ChevronUp className="h-4 w-4 ml-1" /> : <ChevronDown className="h-4 w-4 ml-1" />}
               </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={handleShare}
-                className="border-gray-600 text-gray-400 hover:text-white hover:bg-gray-800 bg-transparent"
-              >
-                <Share2 className="h-5 w-5" />
-              </Button>
-            </div>
-          </div>
+            )}
+          </p>
+        </section>
 
-          {/* Rating & Genres */}
-          <div className="flex items-center gap-4 mb-6">
-            <div className="flex items-center gap-1 bg-yellow-600 text-black px-2 py-1 rounded">
-              <Star className="h-4 w-4 fill-current" />
-              <span className="font-semibold">{movie.rating}</span>
+        {/* Video Player */}
+        {youtubeId && (
+          <section className="mb-6">
+            <h2 className="text-2xl font-bold mb-3">Trailer</h2>
+            <div className="relative aspect-video rounded-lg overflow-hidden">
+              <Plyr
+                source={{
+                  type: "video",
+                  sources: [
+                    {
+                      src: youtubeId,
+                      provider: "youtube",
+                    },
+                  ],
+                }}
+                options={{
+                  controls: ["play", "progress", "current-time", "mute", "volume", "fullscreen"],
+                  autoplay: false,
+                  loop: { active: false },
+                }}
+              />
             </div>
-            <div className="flex gap-2 flex-wrap">
-              {movie.genre.map((genre) => (
-                <Badge key={genre} variant="secondary" className="bg-gray-800 text-gray-300">
-                  {genre}
-                </Badge>
+          </section>
+        )}
+
+        {/* Cast */}
+        {cast.length > 0 && (
+          <section className="mb-6">
+            <h2 className="text-2xl font-bold mb-3">Cast</h2>
+            <div className="flex overflow-x-auto hide-scrollbar space-x-4 pb-2">
+              {cast.slice(0, 10).map((member) => (
+                <CastCard
+                  key={member.id}
+                  name={member.name}
+                  character={member.character}
+                  profilePath={member.profile_path}
+                />
               ))}
             </div>
-          </div>
+          </section>
+        )}
 
-          {/* Description */}
-          <Card className="bg-gray-900 border-gray-800">
-            <CardContent className="p-4">
-              <h3 className="text-lg font-semibold text-white mb-2">Description</h3>
-              <p className="text-gray-300 leading-relaxed">{description}</p>
-            </CardContent>
-          </Card>
-
-          {/* Action Buttons */}
-          <div className="flex gap-4 mt-6">
-            <Button onClick={handlePlay} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" size="lg">
-              <Play className="h-5 w-5 mr-2 fill-current" />
-              Watch Now
-            </Button>
+        {/* Details */}
+        <section className="mb-6">
+          <h2 className="text-2xl font-bold mb-3">Details</h2>
+          <div className="grid grid-cols-2 gap-4">
+            <DetailCard label="Release Date" value={movie.release_date || "N/A"} icon="release" />
+            <DetailCard label="Runtime" value={formatRuntime(movie.runtime)} icon="runtime" />
+            <DetailCard label="Status" value={movie.status || "N/A"} icon="status" />
+            <DetailCard label="Budget" value={formatCurrency(movie.budget)} icon="budget" />
+            <DetailCard label="Revenue" value={formatCurrency(movie.revenue)} icon="revenue" />
+            {movie.spoken_languages.length > 0 && (
+              <DetailCard label="Language" value={movie.spoken_languages[0]?.english_name || "N/A"} icon="status" />
+            )}
           </div>
-        </div>
+        </section>
+
+        {/* Production Companies */}
+        {movie.production_companies.length > 0 && (
+          <section className="mb-6">
+            <h2 className="text-2xl font-bold mb-3">Production Companies</h2>
+            <div className="flex overflow-x-auto hide-scrollbar space-x-4 pb-2">
+              {movie.production_companies.map((company) => (
+                <CompanyCard key={company.id} name={company.name} logoPath={company.logo_path} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Images */}
+        {images.length > 0 && (
+          <section className="mb-6">
+            <h2 className="text-2xl font-bold mb-3">Images</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {images.slice(0, 8).map((img, index) => (
+                <div
+                  key={index}
+                  className="relative aspect-video rounded-lg overflow-hidden cursor-pointer group"
+                  onClick={() => handleImageClick(getImageUrl(img.file_path, "original"))}
+                >
+                  <Image
+                    src={getImageUrl(img.file_path, "w500") || "/placeholder.svg"}
+                    alt={`Image ${index + 1}`}
+                    fill
+                    className="object-cover transition-transform duration-300 group-hover:scale-105"
+                    onError={(e) => {
+                      e.currentTarget.src = "/placeholder.svg?height=281&width=500"
+                      e.currentTarget.srcset = ""
+                    }}
+                  />
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <ImageIcon className="h-8 w-8 text-white" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
+
+      <ImageModal
+        isOpen={isImageModalOpen}
+        onClose={() => setIsImageModalOpen(false)}
+        imageUrl={currentImage}
+        altText={movie.title}
+      />
     </div>
   )
 }

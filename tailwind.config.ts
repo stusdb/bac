@@ -1,6 +1,6 @@
 import type { Config } from "tailwindcss"
 
-const config: Config = {
+const config = {
   darkMode: ["class"],
   content: [
     "./pages/**/*.{ts,tsx}",
@@ -9,6 +9,7 @@ const config: Config = {
     "./src/**/*.{ts,tsx}",
     "*.{js,ts,jsx,tsx,mdx}",
   ],
+  prefix: "",
   theme: {
     container: {
       center: true,
@@ -52,9 +53,14 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        gray: {
-          950: "#0a0a0a",
-        },
+        // Custom colors based on provided design
+        "primary-red": "var(--primary-color)",
+        "secondary-black": "var(--secondary-color)",
+        "text-white": "var(--text-color)",
+        "accent-gold": "var(--accent-color)",
+        "background-dark": "var(--background-dark)",
+        "background-light": "var(--background-light)",
+        "border-gray": "var(--border-color)",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -74,6 +80,11 @@ const config: Config = {
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+      },
+      fontFamily: {
+        tajawal: ["var(--font-tajawal)"],
+        cinzel: ["var(--font-cinzel)"],
+        baloo: ["var(--font-baloo)"],
       },
     },
   },
